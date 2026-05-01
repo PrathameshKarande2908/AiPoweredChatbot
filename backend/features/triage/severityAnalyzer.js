@@ -1,7 +1,7 @@
 const normalizeText = (text = "") =>
-  text
+  String(text)
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -20,6 +20,8 @@ const collectMatchedLabels = (text, groups = []) => {
   return matches;
 };
 
+const unique = (items = []) => [...new Set(items.filter(Boolean))];
+
 const emergencyGroups = [
   {
     label: "chest pain",
@@ -34,7 +36,7 @@ const emergencyGroups = [
   {
     label: "trouble breathing",
     patterns: [
-      /\b(can t breathe|cannot breathe|difficulty breathing|shortness of breath|breathing problem|breathless)\b/,
+      /\b(can t breathe|cannot breathe|difficulty breathing|shortness of breath|breathing problem|breathless|breathing issue|breathing difficulty)\b/,
       /सांस लेने में दिक्कत/,
       /सांस नहीं ले पा/,
       /श्वास घेण्यास त्रास/,
@@ -72,13 +74,7 @@ const emergencyGroups = [
   },
   {
     label: "seizure",
-    patterns: [
-      /\b(seizure|convulsion|fits)\b/,
-      /दौरा/,
-      /झटके/,
-      /फिट्स/,
-      /आकडी/,
-    ],
+    patterns: [/\b(seizure|convulsion|fits)\b/, /दौरा/, /झटके/, /फिट्स/, /आकडी/],
   },
   {
     label: "stroke warning signs",
@@ -129,9 +125,19 @@ const moderateGroups = [
     ],
   },
   {
+    label: "vomiting or diarrhea",
+    patterns: [
+      /\b(vomiting|vomit|diarrhea|loose motion|loose motions|stomach upset with vomiting|stomach upset with diarrhea)\b/,
+      /उल्टी/,
+      /दस्त/,
+      /उलट्या/,
+      /जुलाब/,
+    ],
+  },
+  {
     label: "persistent vomiting or diarrhea",
     patterns: [
-      /\b(persistent vomiting|vomiting again and again|severe vomiting|diarrhea many times)\b/,
+      /\b(persistent vomiting|vomiting again and again|severe vomiting|diarrhea many times|repeated vomiting|continuous diarrhea)\b/,
       /बार बार उल्टी/,
       /लगातार उल्टी/,
       /बार बार दस्त/,
@@ -155,17 +161,6 @@ const moderateGroups = [
     label: "abdominal pain",
     patterns: [/\bstomach pain\b/, /\babdominal pain\b/, /पेट में दर्द/, /पोटात दुख/],
   },
-  {
-    label: "infection-like symptoms",
-    patterns: [
-      /\bcough and fever\b/,
-      /\bsore throat and fever\b/,
-      /खांसी और बुखार/,
-      /गले में दर्द और बुखार/,
-      /खोकला आणि ताप/,
-      /घसा दुखणे आणि ताप/,
-    ],
-  },
 ];
 
 const mildGroups = [
@@ -175,7 +170,7 @@ const mildGroups = [
   },
   {
     label: "cough or cold",
-    patterns: [/\bcough\b/, /\bcold\b/, /खांसी/, /सर्दी/, /खोकला/],
+    patterns: [/\bcough\b/, /\bcold\b/, /\bcommon cold\b/, /खांसी/, /सर्दी/, /खोकला/],
   },
   {
     label: "headache",
@@ -194,7 +189,11 @@ const mildGroups = [
 const inferPrimaryConcern = (text, matchedTriggers = []) => {
   const combined = `${text} ${matchedTriggers.join(" ")}`;
 
-  if (/cough|cold|throat|breath|breathing|fever|viral|infection|खांसी|खोकला|घसा|सांस|श्वास|ताप|बुखार/.test(combined)) {
+  if (/chest pain|heart|palpitation|cardiac|सीने|छाती|हृदय/.test(combined)) {
+    return "cardiac";
+  }
+
+  if (/cough|cold|throat|breath|breathing|breathing irritation|fever|viral|infection|खांसी|खोकला|घसा|सांस|श्वास|ताप|बुखार/.test(combined)) {
     return "respiratory";
   }
 
@@ -213,7 +212,58 @@ const inferPrimaryConcern = (text, matchedTriggers = []) => {
   return "general";
 };
 
-export const analyzeSeverity = (inputText = "") => {
+const hasText = (text, pattern) => pattern.test(text);
+
+const detectProgression = (currentText, memory = null) => {
+  const knownSymptoms = Array.isArray(memory?.knownSymptoms)
+    ? memory.knownSymptoms.join(" ").toLowerCase()
+    : "";
+  const combined = `${knownSymptoms} ${currentText}`;
+  const flags = [];
+  let upgradeTo = null;
+
+  const hasRespiratoryBase = hasText(combined, /cough|cold|sore throat|throat|fever|खांसी|खोकला|घसा|ताप|बुखार/);
+  const hasBreathingConcern = hasText(currentText, /breathing irritation|breathing issue|difficulty breathing|shortness of breath|breathless|wheezing|सांस|श्वास|दम/);
+
+  if (hasRespiratoryBase && hasBreathingConcern) {
+    flags.push("respiratory symptoms are progressing with breathing discomfort");
+    upgradeTo = "MODERATE";
+  }
+
+  const hasDigestiveBase = hasText(combined, /vomit|vomiting|diarrhea|loose motion|stomach pain|उल्टी|उलट्या|दस्त|जुलाब|पेट|पोट/);
+  const hasWeaknessOrDehydration = hasText(currentText, /very weak|weakness|dizzy|dizziness|dry mouth|less urine|dehydration|कमजोरी|चक्कर|निर्जलीकरण/);
+
+  if (hasDigestiveBase && hasWeaknessOrDehydration) {
+    flags.push("digestive symptoms may be causing dehydration or weakness");
+    upgradeTo = "MODERATE";
+  }
+
+  const hasFeverEarlier = hasText(knownSymptoms, /fever|ताप|बुखार/);
+  const hasCoughNow = hasText(currentText, /cough|sore throat|खांसी|खोकला|घसा/);
+
+  // Fever followed by cough/sore throat is common mild respiratory progression.
+  // Do NOT upgrade it to MODERATE unless breathing difficulty, chest pain,
+  // dehydration, persistent vomiting, or another clear warning sign appears.
+  if (hasFeverEarlier && hasCoughNow && !hasBreathingConcern) {
+    flags.push("fever followed by mild respiratory symptoms");
+  }
+
+  return {
+    flags: unique(flags),
+    upgradeTo,
+  };
+};
+
+const severityRank = {
+  MILD: 1,
+  MODERATE: 2,
+  SEVERE: 3,
+};
+
+const maxSeverity = (a = "MILD", b = "MILD") =>
+  severityRank[b] > severityRank[a] ? b : a;
+
+export const analyzeSeverity = (inputText = "", memory = null) => {
   const text = normalizeText(inputText);
 
   const emergencyMatches = collectMatchedLabels(text, emergencyGroups);
@@ -236,10 +286,20 @@ export const analyzeSeverity = (inputText = "") => {
     matchedTriggers = mildMatches;
   }
 
+  const primaryConcern = inferPrimaryConcern(text, matchedTriggers);
+  const progression = detectProgression(text, memory);
+
+  if (!isEmergency && progression.upgradeTo) {
+    level = maxSeverity(level, progression.upgradeTo);
+    matchedTriggers = unique([...matchedTriggers, ...progression.flags]);
+  }
+
   return {
     level,
-    isEmergency,
+    isEmergency: level === "SEVERE" || isEmergency,
     matchedTriggers,
-    primaryConcern: inferPrimaryConcern(text, matchedTriggers),
+    primaryConcern,
+    progressionFlags: progression.flags,
+    usedMemory: Boolean(memory?.knownSymptoms?.length),
   };
 };

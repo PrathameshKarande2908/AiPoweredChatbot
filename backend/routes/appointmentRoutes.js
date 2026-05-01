@@ -1,6 +1,7 @@
 import express from "express";
 import {
   createAppointment,
+  autoBookAppointment,
   listAppointments,
   updateAppointment,
   deleteAppointment,
@@ -9,6 +10,7 @@ import {
 const router = express.Router();
 
 router.post("/create", createAppointment);
+router.post("/auto-book", autoBookAppointment);
 router.get("/list/:userId", listAppointments);
 router.get("/list", listAppointments);
 router.put("/:id", updateAppointment);

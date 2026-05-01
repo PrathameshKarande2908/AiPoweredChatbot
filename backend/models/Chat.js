@@ -20,6 +20,34 @@ const messageSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const conditionMemorySchema = new mongoose.Schema(
+  {
+    knownSymptoms: {
+      type: [String],
+      default: [],
+    },
+    primaryConcern: {
+      type: String,
+      default: "general",
+      trim: true,
+    },
+    highestSeverity: {
+      type: String,
+      enum: ["MILD", "MODERATE", "SEVERE"],
+      default: "MILD",
+    },
+    progressionFlags: {
+      type: [String],
+      default: [],
+    },
+    lastUpdatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const chatSchema = new mongoose.Schema(
   {
     userId: {
@@ -42,6 +70,10 @@ const chatSchema = new mongoose.Schema(
     messages: {
       type: [messageSchema],
       default: [],
+    },
+    conditionMemory: {
+      type: conditionMemorySchema,
+      default: () => ({}),
     },
   },
   {
